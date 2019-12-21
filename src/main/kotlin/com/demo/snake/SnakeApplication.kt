@@ -5,6 +5,9 @@ import com.googlecode.lanterna.input.KeyStroke
 import com.googlecode.lanterna.input.KeyType
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory
 import com.googlecode.lanterna.terminal.Terminal
+import java.util.*
+import kotlin.concurrent.scheduleAtFixedRate
+import kotlin.system.exitProcess
 
 const val window_width: Int = 30
 const val widnow_height: Int = 20
@@ -32,42 +35,49 @@ data class Game(var snake: Snake, var apples: Apples) {
             .setTerminalEmulatorTitle("Snake Game :D")
             .createTerminal()
 
-    private var gameState = GameState.IN_PROGRESS
+    private var gameState = GameState.INITIALIZATION
+    private lateinit var gameCycle: TimerTask
 
     init {
         terminal.enterPrivateMode()
-        startGame()
         terminal.flush()
-        runGameCycle()
+        startGame()
     }
 
     private fun startGame() {
         terminal.clearScreen()
-        gameState = GameState.IN_PROGRESS
-        snake = Snake(initCells)
+        snake = Snake(initCells.map { it.copy() })
         apples = Apples()
         drawGame()
+        if (gameState == GameState.INITIALIZATION) {
+            gameCycle = Timer("gameCycle", false).scheduleAtFixedRate(0, 200) {
+                gameCycle()
+            }
+        }
+        gameState = GameState.IN_PROGRESS
     }
 
-    private fun runGameCycle() {
-        do {
-            val keyStroke = terminal.readInput()
-            systemProcess(keyStroke)
+    private fun gameCycle() {
+        val keyStroke: KeyStroke? = terminal.pollInput()
+        systemProcess(keyStroke)
+        if (gameState != GameState.IN_PROGRESS)
+            return
 
-            if (gameState != GameState.IN_PROGRESS) continue
-
-            drawGame()
-
-            update(keyStroke)
-        } while (keyStroke.keyType != KeyType.Escape)
+        drawGame()
+        update(keyStroke)
     }
 
-    private fun systemProcess(keyStroke: KeyStroke) {
-        if (keyStroke.keyType == KeyType.Enter) {
-            when (gameState) {
-                GameState.GAME_OVER -> startGame()
-                GameState.IN_PROGRESS -> pause()
-                GameState.PAUSE -> resume()
+    private fun systemProcess(keyStroke: KeyStroke?) {
+        when (keyStroke?.keyType) {
+            KeyType.Enter ->
+                when (gameState) {
+                    GameState.GAME_OVER -> startGame()
+                    GameState.IN_PROGRESS -> pause()
+                    GameState.PAUSE -> resume()
+                }
+            KeyType.Escape -> {
+                gameCycle.cancel()
+                exitProcess(0)
             }
         }
     }
@@ -94,8 +104,8 @@ data class Game(var snake: Snake, var apples: Apples) {
         terminal.flush()
     }
 
-    private fun update(keyStroke: KeyStroke) {
-        val newDirection = when (keyStroke.keyType) {
+    private fun update(keyStroke: KeyStroke?) {
+        val newDirection = when (keyStroke?.keyType) {
             KeyType.ArrowUp -> Direction.UP
             KeyType.ArrowDown -> Direction.DOWN
             KeyType.ArrowLeft -> Direction.LEFT
@@ -108,7 +118,7 @@ data class Game(var snake: Snake, var apples: Apples) {
         snake.eat(apples)
         apples.grow()
 
-        val score = snake.cells.size
+        val score = snake.tail.size + 1
         val isOver = snake.tail.contains(snake.head)
                 || snake.cells.any {
             it.x !in 0.until(max_columns) || it.y !in 0.until(max_rows)
@@ -230,6 +240,7 @@ enum class Direction(val dx: Int, val dy: Int) {
 }
 
 enum class GameState {
+    INITIALIZATION,
     IN_PROGRESS,
     PAUSE,
     GAME_OVER
