@@ -36,7 +36,8 @@ data class Game(var snake: Snake, var apples: Apples) {
             .createTerminal()
 
     private var gameState = GameState.INITIALIZATION
-    private lateinit var gameCycle: TimerTask
+    private var score = 3
+    private lateinit var gameCycle: Timer
 
     init {
         terminal.enterPrivateMode()
@@ -48,13 +49,24 @@ data class Game(var snake: Snake, var apples: Apples) {
         terminal.clearScreen()
         snake = Snake(initCells.map { it.copy() })
         apples = Apples()
+        score = snake.tail.size + 1
         drawGame()
-        if (gameState == GameState.INITIALIZATION) {
-            gameCycle = Timer("gameCycle", false).scheduleAtFixedRate(0, 200) {
-                gameCycle()
-            }
-        }
+        startGameCycle()
         gameState = GameState.IN_PROGRESS
+    }
+
+    private fun startGameCycle() {
+        val period = when {
+            score <= 5 -> 200L
+            score <= 10 -> 180L
+            score <= 15 -> 160L
+            score <= 20 -> 140L
+            else -> 120L
+        }
+        gameCycle = Timer("gameCycle", false)
+        gameCycle.scheduleAtFixedRate(period, period) {
+            gameCycle()
+        }
     }
 
     private fun gameCycle() {
@@ -63,7 +75,6 @@ data class Game(var snake: Snake, var apples: Apples) {
         if (gameState != GameState.IN_PROGRESS)
             return
 
-        drawGame()
         update(keyStroke)
     }
 
@@ -71,7 +82,11 @@ data class Game(var snake: Snake, var apples: Apples) {
         when (keyStroke?.keyType) {
             KeyType.Enter ->
                 when (gameState) {
-                    GameState.GAME_OVER -> startGame()
+                    GameState.GAME_OVER -> {
+                        gameState = GameState.INITIALIZATION
+                        gameCycle.cancel()
+                        startGame()
+                    }
                     GameState.IN_PROGRESS -> pause()
                     GameState.PAUSE -> resume()
                 }
@@ -115,13 +130,19 @@ data class Game(var snake: Snake, var apples: Apples) {
 
         snake.turn(newDirection)
         snake.move()
-        snake.eat(apples)
+        val increased = snake.eat(apples)
         apples.grow()
 
-        val score = snake.tail.size + 1
+        score = snake.tail.size + 1
         val isOver = snake.tail.contains(snake.head)
                 || snake.cells.any {
-            it.x !in 0.until(max_columns) || it.y !in 0.until(max_rows)
+            it.x !in 1.until(max_columns - 1) || it.y !in 1.until(max_rows)
+        }
+
+        drawGame()
+        if (increased) {
+            gameCycle.cancel()
+            startGameCycle()
         }
 
         if (isOver) gameOver(score)
@@ -129,7 +150,7 @@ data class Game(var snake: Snake, var apples: Apples) {
 
     private fun drawGame() {
         terminal.clearScreen()
-        apples.cells.forEach { apple -> printInPosition('•', apple) }
+        apples.cells.forEach { apple -> printInPosition('', apple) }
         snake.tail.forEach { tailSegment -> printInPosition('o', tailSegment) }
         val headChar = when (snake.currDirection) {
             Direction.UP -> '∆'
@@ -144,8 +165,8 @@ data class Game(var snake: Snake, var apples: Apples) {
 
     private fun drawBox() {
         for (i in 0 until max_columns) {
-            printInPosition('-', Cell(i, 0))
-            printInPosition('-', Cell(i, max_rows - 1))
+            printInPosition('_', Cell(i, 0))
+            printInPosition('¯', Cell(i, max_rows))
         }
         for (i in 0 until max_rows) {
             printInPosition('|', Cell(0, i))
@@ -193,11 +214,13 @@ data class Snake(val cells: List<Cell>, private var direction: Direction = Direc
         }
     }
 
-    fun eat(apples: Apples) {
+    fun eat(apples: Apples): Boolean {
         if (head in apples.cells) {
             apples.cells.remove(head)
             tail.add(Cell(tail.last().x, tail.last().y))
+            return true
         }
+        return false
     }
 }
 
